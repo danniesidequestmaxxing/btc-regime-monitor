@@ -68,6 +68,28 @@ vercel dev            # full local environment including /api
 vercel deploy --prod  # ship
 ```
 
+### Tests
+
+```bash
+node tests/run.js
+```
+
+64 assertions over the indicator layer. Every fixture is small enough to check
+by hand, and the expected value is written alongside the arithmetic that
+produces it, so the test can be verified rather than trusted.
+
+The tests do not keep their own copy of the functions. They extract the shipped
+code from `btc-regime.html` between `PURE:BEGIN` / `PURE:END` markers and
+evaluate it, so a function that drifts out of a marked region fails loudly
+instead of silently going untested. A dedicated block runs the page's
+classifier and `api/_engine.js` against identical inputs and asserts they
+agree, which is the guard against the two implementations diverging.
+
+The suite has been mutation-tested: flipping the pivot comparison, making
+`pctRank` inclusive, switching `stdev` to a population deviation, inverting the
+CVD sign, moving the quadrant boundary, and changing the annualisation factor
+each fail it.
+
 ### Regenerating the validation
 
 ```bash
@@ -113,7 +135,10 @@ Hosting does not proxy anything — the browser fetches exchange APIs directly, 
   Liquidation history cannot be derived after the fact — capturing the
   websocket stream is the one part of this project that would genuinely
   justify a database.
-- `api/_engine.js` re-implements the classifier server-side so the page stays self-contained. Both read `config.json`, so parameters cannot drift, but the code paths can. A rule change must be made in both places.
+- `api/_engine.js` re-implements the classifier server-side so the page stays
+  self-contained. Both read `config.json`, so parameters cannot drift, and
+  `tests/run.js` asserts the two agree on every state and on the shared
+  primitives — but a rule change still has to be made in both places.
 
 ## Not included
 

@@ -893,6 +893,9 @@ async function tryJSON(url, key, altUrl){
 }
 
 /* ---------------- pure indicator helpers ---------------- */
+/* PURE:BEGIN core — tests/run.js extracts this region verbatim. Keep pure
+   functions inside the markers; anything that touches the DOM, the network or
+   module state belongs outside them. */
 const closes = k => k.map(r => +r[4]);
 const highs  = k => k.map(r => +r[2]);
 const lows   = k => k.map(r => +r[3]);
@@ -974,6 +977,7 @@ function quadrant(dOI, dPx){
   if (dOI > 0 && dPx <= 0) return "new-shorts";
   return "long-unwind";
 }
+/* PURE:END core */
 
 /* ---------------- load ---------------- */
 async function loadAll(){
@@ -1178,6 +1182,7 @@ function compute(){
    Precedence order is top to bottom. CONFLICTED is a real
    state: structure and positioning disagreeing is information.
    ============================================================ */
+/* PURE:BEGIN classify */
 function classify(I){
   const has = v => v !== undefined && v !== null;
   const st = I.struct ? I.struct.state : null;
@@ -1253,6 +1258,7 @@ function classify(I){
 
   return { state, groups, disagreement };
 }
+/* PURE:END classify */
 
 /** Funding percentiles as they stood at a past timestamp, not today's ranks. */
 function fundPctAt(I, ts){
@@ -1368,6 +1374,7 @@ async function extGet(url, key, opts){
 }
 
 /* ---- minimal ZIP reader: Binance archive stores one deflated CSV ---- */
+/* PURE:BEGIN zip */
 async function unzipSingle(buf){
   const dv = new DataView(buf), u8 = new Uint8Array(buf);
   if (dv.getUint32(0, true) !== 0x04034b50) throw new Error("not a zip");
@@ -1384,6 +1391,7 @@ async function unzipSingle(buf){
   const out = new Response(new Blob([body]).stream().pipeThrough(ds));
   return await out.text();
 }
+/* PURE:END zip */
 
 /* ---- item 18: 90-day coin-OI baseline from the bulk archive ----
    The REST endpoint caps at 30 days. The archive goes back to 2020,
@@ -1516,6 +1524,7 @@ async function loadExt(){
 }
 
 /* ---- indicators ---- */
+/* PURE:BEGIN ext */
 function rsi(values, n){
   const out = new Array(values.length).fill(null);
   if (values.length <= n) return out;
@@ -1556,6 +1565,7 @@ function cvdFromKlines(k, days){
   }
   return { last: cvd, series };
 }
+/* PURE:END ext */
 
 function computeExt(){
   const E = EXT.ind, D = EXT.data, I = S.ind;

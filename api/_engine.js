@@ -171,3 +171,5 @@ function compute(D, CFG){
 }
 
 module.exports = { gather, compute };
+// test seam: tests/run.js asserts these agree with the page's own copies
+module.exports.__internals = { sma, pctRank, stdev, pivots, structureState, closes };
