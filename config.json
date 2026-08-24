@@ -1,0 +1,42 @@
+{
+  "_version": "1.1.0",
+  "_note": "Thresholds for the BTC regime monitor. Every value is a choice, not a validated parameter. Edit and redeploy; the page falls back to built-in defaults if this file is missing.",
+  "_changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-08-25",
+      "by": "initial",
+      "changes": "Externalised from source. Values unchanged from the built-in defaults."
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-08-25",
+      "by": "build",
+      "changes": "Added skewPutBid and corrMacroHot for the new L2 votes (25-delta skew, BTC-QQQ correlation)."
+    }
+  ],
+  "pivotN": 3,
+  "maLen": 200,
+  "maSlopeLookback": 20,
+  "retLookback": 20,
+  "oiLookback": 20,
+  "fundShort": 7,
+  "fundLong": 30,
+  "pctWindowDays": 730,
+  "rvLen": 30,
+  "rvCompressPct": 20,
+  "fundCoolPct": 50,
+  "fundHotPct": 85,
+  "fundConfirmMaxPct": 80,
+  "oiHotPct": 10,
+  "aggFundHotAnn": 15,
+  "oiVs90Hot": 15,
+  "lsRatioHot": 2,
+  "ratioPosHot": 80,
+  "ivrvHot": 15,
+  "basisColdAnn": 5,
+  "tierL1Arm": 2,
+  "tierL2Arm": 2,
+  "skewPutBid": 5,
+  "corrMacroHot": 0.5
+}
