@@ -42,7 +42,11 @@ function pearson(a, b){
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600");
+  // Never cache a failure. Setting the success policy up front meant a 501 from
+  // a missing key was served from cache for an hour after the key was added.
+  res.setHeader("Cache-Control", "no-store");
+  const cacheOk = () => res.setHeader("Cache-Control",
+    "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400");
 
   const td = process.env.TWELVEDATA_API_KEY, av = process.env.ALPHAVANTAGE_API_KEY;
   if (!td && !av){
@@ -67,6 +71,7 @@ module.exports = async (req, res) => {
       rq.push(Math.log(rows[i].qqq/rows[i-1].qqq));
       rb.push(Math.log(rows[i].btc/rows[i-1].btc));
     }
+    cacheOk();
     res.statusCode = 200;
     res.end(JSON.stringify({
       asOf: new Date().toISOString(),

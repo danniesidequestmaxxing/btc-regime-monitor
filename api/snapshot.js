@@ -17,7 +17,7 @@ function config(){
 
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "public, max-age=60, s-maxage=60");
+  res.setHeader("Cache-Control", "no-store");   // errors and 401s must not cache
 
   const want = process.env.SNAPSHOT_TOKEN;
   if (want){
@@ -32,6 +32,7 @@ module.exports = async (req, res) => {
 
   try {
     const snap = compute(await gather(), config());
+    res.setHeader("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=300");
     if (!want) snap.auth = "disabled — set the SNAPSHOT_TOKEN environment variable to require a read-only token";
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.statusCode = 200;

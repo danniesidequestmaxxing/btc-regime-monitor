@@ -41,8 +41,12 @@ function pctRank(arr, v){
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  // one upstream fetch an hour, shared by every viewer
-  res.setHeader("Cache-Control", "public, max-age=900, s-maxage=3600, stale-while-revalidate=86400");
+  // Default to no-store so a transient upstream failure is never cached; the
+  // success path opts in to the shared hourly cache. max-age=0 keeps the
+  // browser revalidating while s-maxage lets the CDN serve one fetch an hour.
+  res.setHeader("Cache-Control", "no-store");
+  const cacheOk = () => res.setHeader("Cache-Control",
+    "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400");
 
   const out = { asOf: new Date().toISOString(), sources: {}, errors: [] };
   try {
@@ -92,7 +96,9 @@ module.exports = async (req, res) => {
       out.treasury.mNavNote = "mNAV needs MSTR market cap. Set TWELVEDATA_API_KEY or ALPHAVANTAGE_API_KEY to complete it.";
     }
 
-    res.statusCode = out.onchain.sthRealizedPrice == null && out.onchain.mvrvZscore == null ? 502 : 200;
+    const ok = !(out.onchain.sthRealizedPrice == null && out.onchain.mvrvZscore == null);
+    if (ok) cacheOk();
+    res.statusCode = ok ? 200 : 502;
     res.end(JSON.stringify(out, null, 2));
   } catch (e) {
     res.statusCode = 502;

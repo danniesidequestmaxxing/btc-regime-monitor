@@ -1483,7 +1483,7 @@ async function loadExt(){
   if (EXT.__equityOff){
     EXT.data.qqq = EXT.__equityOff;
   } else {
-    EXT.data.qqq = await fetch("/api/equity")
+    EXT.data.qqq = await fetch("/api/equity", { cache: "no-store" })
       .then(async r => ({ ok:r.ok, status:r.status, body: await r.json() }))
       .catch(() => null);
     if (EXT.data.qqq && EXT.data.qqq.status === 501) EXT.__equityOff = EXT.data.qqq;
@@ -1491,7 +1491,7 @@ async function loadExt(){
 
   // Item 14 and treasury go through our own route: bitcoin-data.com rate-limits
   // by the hour, so one edge-cached fetch serves every viewer.
-  EXT.data.onchain = await fetch("/api/onchain")
+  EXT.data.onchain = await fetch("/api/onchain", { cache: "no-store" })
     .then(async r => ({ ok:r.ok, body: await r.json() })).catch(() => null);
 
   // Item 18: forced liquidations, free and CORS-clean, with the long/short side.
