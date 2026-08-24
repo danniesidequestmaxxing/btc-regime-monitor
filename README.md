@@ -45,6 +45,15 @@ All public, no API key required for anything on the page.
 | Bybit, OKX, Hyperliquid | cross-venue funding and OI |
 | Coinbase | US spot premium |
 | DefiLlama | stablecoin supply |
+| bitcoin-data.com | short/long-term holder cost basis, MVRV Z-score, NUPL |
+| Coin Metrics Community | MVRV, market cap, exchange flows |
+| OKX liquidation orders | forced liquidations with the long/short split |
+| CoinGecko public_treasury | corporate BTC holdings and cost basis |
+
+**No paid subscription is required for anything in this repo.** The on-chain group
+normally sold at roughly $99/month and the liquidation split normally sold at
+roughly $299/month are both served free by the sources above. Two gaps remain
+with no free equivalent found: spot ETF net flows and CME basis.
 
 Failed requests grey their panel and print the status code. Nothing is interpolated, forward-filled, or estimated.
 
@@ -95,11 +104,28 @@ Hosting does not proxy anything — the browser fetches exchange APIs directly, 
 - OI-to-volume divides by a trailing 7-day mean, because raw daily perp volume has a strong weekday cycle that would otherwise dominate the reading.
 - The L1/L2/L3 tier membership is inferred, not specified. Treat it as a weak prior.
 - The event log stores to `localStorage` — it is per-browser, not shared.
+- `bitcoin-data.com` rate-limits by the hour, which is why the on-chain metrics
+  are served through `/api/onchain` with `s-maxage=3600` rather than fetched
+  per viewer. It is a small single operator with four years of history and no SLA;
+  Coin Metrics is the more institutional source where the two overlap.
+- Liquidations are a rolling window of roughly four hours from a single venue.
+  Depth and cross-venue aggregation are what the paid feeds actually sell.
+  Liquidation history cannot be derived after the fact — capturing the
+  websocket stream is the one part of this project that would genuinely
+  justify a database.
 - `api/_engine.js` re-implements the classifier server-side so the page stays self-contained. Both read `config.json`, so parameters cannot drift, but the code paths can. A rule change must be made in both places.
 
 ## Not included
 
-On-chain metrics, liquidation splits, ETF flows and CME basis all require paid data subscriptions and are not implemented.
+- **Spot ETF net flows** — Farside returns 403 to automated requests and no free
+  machine-readable alternative was found.
+- **CME basis** — no free source.
+- **BTC–QQQ correlation** — implemented at `/api/equity`, but dormant until an
+  equity API key is set. Free browser-reachable equity data no longer exists:
+  Stooq serves a proof-of-work bot challenge and Yahoo sends no CORS header.
+- **mNAV** — the treasury panel shows holdings and cost basis; the ratio needs an
+  equity market cap, so it completes with the same key.
+- **LTH supply** — age-banded supply is not in either free on-chain source.
 
 ---
 

@@ -1,5 +1,5 @@
 {
-  "_version": "1.1.0",
+  "_version": "1.2.0",
   "_note": "Thresholds for the BTC regime monitor. Every value is a choice, not a validated parameter. Edit and redeploy; the page falls back to built-in defaults if this file is missing.",
   "_changelog": [
     {
@@ -13,6 +13,12 @@
       "date": "2026-08-25",
       "by": "build",
       "changes": "Added skewPutBid and corrMacroHot for the new L2 votes (25-delta skew, BTC-QQQ correlation)."
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-08-25",
+      "by": "build",
+      "changes": "Added mvrvZHotPct, nuplEuphoria and liqSkewHot for the on-chain and liquidation votes (items 14 and 18), sourced free from bitcoin-data.com, CoinGecko and OKX."
     }
   ],
   "pivotN": 3,
@@ -38,5 +44,8 @@
   "tierL1Arm": 2,
   "tierL2Arm": 2,
   "skewPutBid": 5,
-  "corrMacroHot": 0.5
+  "corrMacroHot": 0.5,
+  "mvrvZHotPct": 80,
+  "nuplEuphoria": 0.5,
+  "liqSkewHot": 2
 }

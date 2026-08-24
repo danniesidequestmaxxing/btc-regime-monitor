@@ -706,6 +706,67 @@ footer strong{color:var(--ink-2);font-weight:600}
   </section>
 
   <section>
+    <h2>On-chain cost basis and forced selling</h2>
+    <div class="grid" style="margin-top:12px">
+
+      <div class="panel" id="pnSTH">
+        <div class="p-head"><h3>Short-term holder cost basis</h3><span class="p-flag flat" id="sthFlag">—</span></div>
+        <div class="p-body">
+          <div class="big" id="sthVal">—</div>
+          <p class="sub" id="sthSub">—</p>
+          <div class="kv" id="sthKv"></div>
+        </div>
+        <div class="p-foot"><span id="ftSTH">—</span><span class="tierbadge">L2</span></div>
+      </div>
+
+      <div class="panel" id="pnMVRV">
+        <div class="p-head"><h3>MVRV Z-score</h3><span class="p-flag flat" id="mvFlag">—</span></div>
+        <div class="p-body">
+          <div class="big" id="mvVal">—</div>
+          <div class="meter" id="mvMeter">
+            <div class="zone z-lo"></div><div class="zone z-hi"></div>
+            <div class="tickmark" id="mvTick" style="left:0"></div>
+            <span class="cap l">Undervalued</span><span class="cap r">Froth</span>
+          </div>
+          <p class="sub" id="mvSub">—</p>
+        </div>
+        <div class="p-foot"><span id="ftMVRV">—</span><span class="tierbadge">L1</span></div>
+      </div>
+
+      <div class="panel" id="pnNUPL">
+        <div class="p-head"><h3>Net unrealised profit / loss</h3><span class="p-flag flat" id="nuFlag">—</span></div>
+        <div class="p-body">
+          <div class="big" id="nuVal">—</div>
+          <p class="sub" id="nuSub">—</p>
+          <div class="kv" id="nuKv"></div>
+        </div>
+        <div class="p-foot"><span id="ftNUPL">—</span><span class="tierbadge">L1</span></div>
+      </div>
+
+      <div class="panel" id="pnLiq">
+        <div class="p-head"><h3>Forced liquidations</h3><span class="p-flag flat" id="lqFlag">—</span></div>
+        <div class="p-body">
+          <div class="big" id="lqVal">—</div>
+          <p class="sub" id="lqSub">—</p>
+          <div class="kv" id="lqKv"></div>
+        </div>
+        <div class="p-foot"><span id="ftLiq">—</span><span class="tierbadge">L2</span></div>
+      </div>
+
+      <div class="panel" id="pnTreasury">
+        <div class="p-head"><h3>Corporate treasury cost basis</h3><span class="p-flag flat" id="trFlag">—</span></div>
+        <div class="p-body">
+          <div class="big" id="trVal">—</div>
+          <p class="sub" id="trSub">—</p>
+          <div class="kv" id="trKv"></div>
+        </div>
+        <div class="p-foot"><span id="ftTreasury">—</span><span class="tierbadge">L2</span></div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
     <h2>Historical validation</h2>
     <div class="val" id="valPanel" style="margin-top:12px">
       <div class="val-head">
@@ -800,6 +861,9 @@ const CFG = {
   ivrvHot:           15,    // implied minus realized vol points
   skewPutBid:         5,    // 25d skew above this many vol points = protection bid
   corrMacroHot:     0.5,    // BTC-QQQ correlation above this = macro-driven
+  mvrvZHotPct:       80,    // MVRV Z-score percentile above this = valuation froth
+  nuplEuphoria:     0.5,    // net unrealised profit above this = euphoria band
+  liqSkewHot:         2,    // long/short liquidation ratio above this = deleveraging
   basisColdAnn:       5,    // quarterly annualised basis below this = demand fading
   tierL1Arm:          2,    // L1 votes needed to arm early warning
   tierL2Arm:          2,    // L2 votes needed to escalate to confirming
@@ -1416,11 +1480,22 @@ async function loadExt(){
     .then(async r => ({ ok:r.ok, status:r.status, body: await r.json() }))
     .catch(() => null);
 
+  // Item 14 and treasury go through our own route: bitcoin-data.com rate-limits
+  // by the hour, so one edge-cached fetch serves every viewer.
+  EXT.data.onchain = await fetch("/api/onchain")
+    .then(async r => ({ ok:r.ok, body: await r.json() })).catch(() => null);
+
+  // Item 18: forced liquidations, free and CORS-clean, with the long/short side.
+  EXT.data.liq = await extGet(EXT.ep.okx
+    + "/api/v5/public/liquidation-orders?instType=SWAP&uly=BTC-USDT&state=filled&limit=100", "okx liquidations");
+
   const okxOI = await extGet(EXT.ep.okx + "/api/v5/public/open-interest?instId=BTC-USDT-SWAP", "okx OI");
   const bybitFund = await extGet(EXT.ep.bybit + "/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=1", "bybit funding");
   const dapiInfo = await extGet(EXT.ep.dapi + "/dapi/v1/exchangeInfo", "binance COIN-M info");
 
-  EXT.data = { cbTick, dvol, chain, dapiTick, bybit, okx, okxOI, bybitFund, hl, llama, dapiInfo, spot1w };
+  // Merge, do not reassign: qqq, onchain and liq were set on EXT.data above and
+  // a plain assignment here would silently wipe all three.
+  Object.assign(EXT.data, { cbTick, dvol, chain, dapiTick, bybit, okx, okxOI, bybitFund, hl, llama, dapiInfo, spot1w });
 
   if (!EXT.__baselineRunning){
     EXT.__baselineRunning = true;
@@ -1655,6 +1730,39 @@ function computeExt(){
     if (bn) E.aggVsBinance = E.aggFundAnn - bn.ann;
   }
 
+  /* 14 — on-chain cost basis and valuation */
+  const oc = D.onchain && D.onchain.ok ? D.onchain.body : null;
+  if (oc && oc.onchain){
+    E.oc = oc.onchain;
+    E.treasury = oc.treasury || null;
+    if (E.oc.sthRealizedPrice && I.px) E.sthDist = (I.px / E.oc.sthRealizedPrice - 1) * 100;
+    if (E.oc.lthRealizedPrice && I.px) E.lthDist = (I.px / E.oc.lthRealizedPrice - 1) * 100;
+    if (E.treasury && E.treasury.avgEntryPrice && I.px)
+      E.trDist = (I.px / E.treasury.avgEntryPrice - 1) * 100;
+  }
+
+  /* 18 — forced liquidations, long vs short over the venue's rolling window */
+  if (D.liq && Array.isArray(D.liq.data)){
+    let L = 0, Sh = 0, n = 0, tMin = Infinity, tMax = 0;
+    for (const g of D.liq.data){
+      for (const x of (g.details || [])){
+        const sz = parseFloat(x.sz);
+        if (!isFinite(sz)) continue;
+        const ts = +x.ts;
+        if (ts < tMin) tMin = ts;
+        if (ts > tMax) tMax = ts;
+        n++;
+        if (x.posSide === "long") L += sz; else if (x.posSide === "short") Sh += sz;
+      }
+    }
+    if (n){
+      E.liqLong = L; E.liqShort = Sh; E.liqCount = n;
+      E.liqHours = (tMax - tMin) / 3600000;
+      E.liqFrom = tMin; E.liqTo = tMax;
+      E.liqSkew = Sh > 0 ? L / Sh : null;
+    }
+  }
+
   /* 12 — stablecoin aggregate supply */
   if (D.llama && Array.isArray(D.llama) && D.llama.length > 40){
     const pt = D.llama.map(x => ({ t:+x.date*1000, v:+((x.totalCirculatingUSD || x.totalCirculating || {}).peggedUSD) }))
@@ -1695,6 +1803,12 @@ function tiers(){
     v("Long/short ratio > " + CFG.lsRatioHot,
       has(I.ls) ? I.ls > CFG.lsRatioHot : null,
       has(I.ls) ? I.ls.toFixed(2) : "—"),
+    v("MVRV Z in top " + (100-CFG.mvrvZHotPct) + "% of range",
+      has(E.oc) && E.oc.mvrvZPercentile != null ? E.oc.mvrvZPercentile > CFG.mvrvZHotPct : null,
+      has(E.oc) && E.oc.mvrvZPercentile != null ? E.oc.mvrvZPercentile.toFixed(0) : "—"),
+    v("NUPL above " + CFG.nuplEuphoria + " (euphoria)",
+      has(E.oc) && E.oc.nupl != null ? E.oc.nupl > CFG.nuplEuphoria : null,
+      has(E.oc) && E.oc.nupl != null ? E.oc.nupl.toFixed(2) : "—"),
     v("OI/volume in top " + (100-CFG.ratioPosHot) + "% of range",
       has(I.ratioPos) ? I.ratioPos > CFG.ratioPosHot : null,
       has(I.ratioPos) ? I.ratioPos.toFixed(0) : "—"),
@@ -1727,6 +1841,12 @@ function tiers(){
     v("Stablecoin supply contracting 30d",
       has(E.stable30) ? E.stable30 < 0 : null,
       has(E.stable30) ? fmtPct(E.stable30) : "—"),
+    v("Spot below STH cost basis",
+      has(E.sthDist) ? E.sthDist < 0 : null,
+      has(E.sthDist) ? fmtPct(E.sthDist) : "—"),
+    v("Long liquidations > " + CFG.liqSkewHot + "× shorts",
+      has(E.liqSkew) ? E.liqSkew > CFG.liqSkewHot : null,
+      has(E.liqSkew) ? E.liqSkew.toFixed(2) + "×" : "—"),
     v("Taker flow sell-side",
       has(I.tk) ? I.tk < 1 : null,
       has(I.tk) ? I.tk.toFixed(3) : "—"),
@@ -2513,6 +2633,84 @@ function renderExt(){
          E.stable30 > 1 ? "bull" : E.stable30 < 0 ? "bear" : "flat");
     kv("scKv", [["Total supply", "$" + (E.stable/1e9).toFixed(1) + "B"], ["30-day change", fmtPct(E.stable30)]]);
   } else markStale("pnStable","ftStable","DefiLlama unavailable — panel not estimated");
+
+  /* 14 on-chain */
+  const ocErr = EXT.data.onchain && EXT.data.onchain.body && EXT.data.onchain.body.errors || [];
+  if (E.oc && E.oc.sthRealizedPrice != null){
+    unstale("pnSTH","ftSTH", "bitcoin-data.com · " + E.oc.asOfDate);
+    $("sthVal").textContent = fmtUsd(E.oc.sthRealizedPrice);
+    const under = E.sthDist != null && E.sthDist < 0;
+    $("sthVal").className = "big " + (under ? "down" : "up");
+    $("sthSub").textContent = "Average price at which coins moved in the last ~155 days. Spot is "
+      + (E.sthDist != null ? fmtPct(E.sthDist) + (under ? " below it — recent buyers are underwater, which historically turns them into supply on rallies."
+        : " above it — recent buyers are in profit.") : "—");
+    flag("sthFlag", under ? "Underwater" : "In profit", under ? "bear" : "bull");
+    kv("sthKv", [["STH cost basis", fmtUsd(E.oc.sthRealizedPrice)],
+                 ["LTH cost basis", E.oc.lthRealizedPrice ? fmtUsd(E.oc.lthRealizedPrice) : "—"],
+                 ["Spot vs LTH", E.lthDist != null ? fmtPct(E.lthDist) : "—"]]);
+  } else markStale("pnSTH","ftSTH", ocErr.length ? String(ocErr[0]).slice(0,70) : "On-chain route unavailable — panel not estimated");
+
+  if (E.oc && E.oc.mvrvZscore != null){
+    unstale("pnMVRV","ftMVRV", E.oc.historyDays + "d history from " + E.oc.historyFrom);
+    $("mvVal").textContent = E.oc.mvrvZscore.toFixed(2);
+    const p = E.oc.mvrvZPercentile;
+    if (p != null) meter("mvTick", p);
+    $("mvSub").textContent = "Market value against realised value, normalised. "
+      + (p != null ? "Percentile rank " + p.toFixed(0) + " over " + E.oc.historyDays + " days. " : "")
+      + (p != null && p > CFG.mvrvZHotPct ? "Near the top of its range — historically a froth condition, not a timing signal."
+         : p != null && p < 20 ? "Near the bottom of its range." : "Mid-range.");
+    flag("mvFlag", p != null && p > CFG.mvrvZHotPct ? "Froth" : p != null && p < 20 ? "Cheap" : "Neutral",
+         p != null && p > CFG.mvrvZHotPct ? "bear" : p != null && p < 20 ? "bull" : "flat");
+  } else markStale("pnMVRV","ftMVRV", ocErr.length ? String(ocErr[0]).slice(0,70) : "On-chain route unavailable — panel not estimated");
+
+  if (E.oc && E.oc.nupl != null){
+    unstale("pnNUPL","ftNUPL", "bitcoin-data.com · " + E.oc.asOfDate);
+    $("nuVal").textContent = E.oc.nupl.toFixed(3);
+    $("nuVal").className = "big " + (E.oc.nupl > CFG.nuplEuphoria ? "down" : E.oc.nupl < 0 ? "up" : "neutral");
+    $("nuSub").textContent = "Share of market cap that is unrealised profit. Above "
+      + CFG.nuplEuphoria + " is the euphoria band; below zero means the aggregate market is underwater.";
+    flag("nuFlag", E.oc.nupl > CFG.nuplEuphoria ? "Euphoria" : E.oc.nupl < 0 ? "Capitulation" : "Normal",
+         E.oc.nupl > CFG.nuplEuphoria ? "bear" : E.oc.nupl < 0 ? "bull" : "flat");
+    kv("nuKv", [["NUPL", E.oc.nupl.toFixed(3)],
+                ["MVRV", E.oc.mvrv != null ? E.oc.mvrv.toFixed(3) : "—"],
+                ["MVRV Z", E.oc.mvrvZscore != null ? E.oc.mvrvZscore.toFixed(2) : "—"]]);
+  } else markStale("pnNUPL","ftNUPL", ocErr.length ? String(ocErr[0]).slice(0,70) : "On-chain route unavailable — panel not estimated");
+
+  /* 18 liquidations */
+  if (E.liqCount){
+    unstale("pnLiq","ftLiq", E.liqCount + " events over " + E.liqHours.toFixed(1) + "h · OKX BTC-USDT swaps");
+    const dom = E.liqLong > E.liqShort;
+    $("lqVal").textContent = (dom ? "Longs" : "Shorts") + " " + (E.liqSkew != null
+      ? (dom ? E.liqSkew.toFixed(1) : (1/E.liqSkew).toFixed(1)) + "×" : "");
+    $("lqVal").className = "big " + (dom ? "down" : "up");
+    $("lqSub").textContent = dom
+      ? "Long liquidations dominate — leverage is being forced out on the way down, which accelerates moves rather than starting them."
+      : "Short liquidations dominate — a squeeze is doing the work, which is fuel that exhausts rather than fresh demand.";
+    flag("lqFlag", E.liqSkew != null && E.liqSkew > CFG.liqSkewHot ? "Long flush"
+       : E.liqSkew != null && E.liqSkew < 1/CFG.liqSkewHot ? "Short squeeze" : "Balanced",
+       E.liqSkew != null && E.liqSkew > CFG.liqSkewHot ? "bear"
+       : E.liqSkew != null && E.liqSkew < 1/CFG.liqSkewHot ? "caution" : "flat");
+    kv("lqKv", [["Longs liquidated", fmtNum(E.liqLong,0) + " ct"],
+                ["Shorts liquidated", fmtNum(E.liqShort,0) + " ct"],
+                ["Window", E.liqHours.toFixed(1) + " hours"],
+                ["Events", String(E.liqCount)]]);
+  } else markStale("pnLiq","ftLiq","Liquidation feed unavailable — panel not estimated");
+
+  /* treasury */
+  if (E.treasury && E.treasury.avgEntryPrice){
+    unstale("pnTreasury","ftTreasury", "CoinGecko public_treasury");
+    $("trVal").textContent = fmtUsd(E.treasury.avgEntryPrice);
+    const above = E.trDist != null && E.trDist > 0;
+    $("trVal").className = "big " + (above ? "up" : "down");
+    $("trSub").textContent = E.treasury.name + " holds " + fmtNum(E.treasury.btcHeld,0)
+      + " BTC at this average entry. Spot is " + (E.trDist != null ? fmtPct(E.trDist) : "—")
+      + (above ? " above it." : " below it — the largest corporate holder is underwater.");
+    flag("trFlag", above ? "In profit" : "Underwater", above ? "bull" : "bear");
+    kv("trKv", [["BTC held", fmtNum(E.treasury.btcHeld,0)],
+                ["NAV", "$" + (E.treasury.navUsd/1e9).toFixed(1) + "B"],
+                ["All companies", fmtNum(E.treasury.allCompaniesBtc,0) + " ₿"],
+                ["mNAV", "needs equity key"]]);
+  } else markStale("pnTreasury","ftTreasury","Treasury data unavailable — panel not estimated");
 
   /* 15 BTC vs QQQ */
   const q = EXT.data.qqq;
