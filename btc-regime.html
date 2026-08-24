@@ -1020,7 +1020,7 @@ async function loadAll(){
   catch (e) { S.errors.push("extended modules → " + (e.message || "failed")); renderMissing(); }
   if (S.errors.length){
     $("errBox").classList.add("show");
-    $("errList").innerHTML = S.errors.map(x => "<li>" + x + "</li>").join("");
+    renderErrorList();
   }
   setStatus(S.errors.length ? "err" : "live",
             S.errors.length ? S.errors.length + " request(s) failed" : "Live");
@@ -1378,6 +1378,8 @@ async function unzipSingle(buf){
   const body = u8.subarray(start, start + compSize);
   if (method === 0) return new TextDecoder().decode(body);
   if (method !== 8) throw new Error("unsupported zip method " + method);
+  if (typeof DecompressionStream === "undefined")
+    throw new Error("this browser cannot decompress the OI archive (needs DecompressionStream)");
   const ds = new DecompressionStream("deflate-raw");
   const out = new Response(new Blob([body]).stream().pipeThrough(ds));
   return await out.text();
@@ -1476,9 +1478,16 @@ async function loadExt(){
   });
   // item 15 runs through our own serverless route: no free equity source is
   // reachable from a browser, and the ones that exist sit behind bot checks.
-  EXT.data.qqq = await fetch("/api/equity")
-    .then(async r => ({ ok:r.ok, status:r.status, body: await r.json() }))
-    .catch(() => null);
+  // 501 means no equity key is configured; that will not change mid-session, so
+  // ask once rather than re-erroring on every 5-minute cycle.
+  if (EXT.__equityOff){
+    EXT.data.qqq = EXT.__equityOff;
+  } else {
+    EXT.data.qqq = await fetch("/api/equity")
+      .then(async r => ({ ok:r.ok, status:r.status, body: await r.json() }))
+      .catch(() => null);
+    if (EXT.data.qqq && EXT.data.qqq.status === 501) EXT.__equityOff = EXT.data.qqq;
+  }
 
   // Item 14 and treasury go through our own route: bitcoin-data.com rate-limits
   // by the hour, so one edge-cached fetch serves every viewer.
@@ -1906,6 +1915,17 @@ function setStatus(kind, txt){
   dot.className = "dot" + (kind === "live" ? " live" : kind === "err" ? " err" : "");
   $("statusTxt").textContent = txt + (S.lastOk ? " · " + S.lastOk.toISOString().slice(11,19) + "Z" : "");
 }
+/** Upstream error text is untrusted. Build list items as text nodes. */
+function renderErrorList(){
+  const ul = $("errList");
+  ul.textContent = "";
+  for (const e of S.errors){
+    const li = document.createElement("li");
+    li.textContent = String(e);
+    ul.appendChild(li);
+  }
+}
+
 function markStale(panelId, footId, reason){
   const p = $(panelId); if (p) p.classList.add("stale");
   const f = $(footId); if (f){ f.textContent = reason; f.classList.add("warnmsg"); }
@@ -1930,7 +1950,7 @@ function renderAll(){
   /* errors */
   if (S.errors.length){
     $("errBox").classList.add("show");
-    $("errList").innerHTML = S.errors.map(e => "<li>" + e + "</li>").join("");
+    renderErrorList();
   } else $("errBox").classList.remove("show");
 
   /* ticker */
@@ -2298,7 +2318,8 @@ function renderDiff(){
       '<span class="arrow"><b class="' + (STATE_TEXT[d.from] ? STATE_TEXT[d.from].cls : "s-flat") + '">'
     + d.from.replace(/_/g," ") + '</b>'
     + '<span class="sep">' + (d.changed ? "→" : "held") + '</span>'
-    + (d.changed ? '<b class="' + STATE_TEXT[d.to].cls + '">' + d.to.replace(/_/g," ") + '</b>' : '')
+    + (d.changed ? '<b class="' + (STATE_TEXT[d.to] ? STATE_TEXT[d.to].cls : "s-flat") + '">'
+        + d.to.replace(/_/g," ") + '</b>' : '')
     + '</span>'
     + '<span class="px">BTC ' + fmtUsd(d.pxThen) + " → " + fmtUsd(d.pxNow) + "  " + fmtPct(d.pxChg) + '</span>';
 
@@ -2478,18 +2499,23 @@ function renderEvents(){
     box.innerHTML = '<div class="evt-empty">No events recorded. Use the form above to note liquidation cascades, macro prints, ETF flow days or anything else worth reading the state against later.</div>';
     return;
   }
-  box.innerHTML = list.map((e,i) =>
-      '<div class="erow"><span class="ed">' + e.date + '</span>'
-    + '<span class="ek">' + e.kind + '</span>'
-    + '<span class="en"></span>'
-    + '<button type="button" data-id="' + e.id + '" title="Delete">×</button></div>').join("");
-  // insert notes as text, never as markup
-  const rows = box.querySelectorAll(".erow");
-  list.forEach((e,i) => { rows[i].querySelector(".en").textContent = e.note; });
-  box.querySelectorAll("button[data-id]").forEach(b => b.addEventListener("click", () => {
-    saveEvents(loadEvents().filter(x => x.id !== b.dataset.id));
-    renderEvents();
-  }));
+  box.textContent = "";
+  for (const e of list){
+    const row = document.createElement("div");
+    row.className = "erow";
+    const mk = (cls, text) => { const el = document.createElement("span"); el.className = cls; el.textContent = String(text ?? ""); return el; };
+    row.appendChild(mk("ed", e.date));
+    row.appendChild(mk("ek", e.kind));
+    row.appendChild(mk("en", e.note));
+    const del = document.createElement("button");
+    del.type = "button"; del.title = "Delete"; del.textContent = "×";
+    del.addEventListener("click", () => {
+      saveEvents(loadEvents().filter(x => x.id !== e.id));
+      renderEvents();
+    });
+    row.appendChild(del);
+    box.appendChild(row);
+  }
 }
 function initEvents(){
   const dEl = $("evtDate");
@@ -2941,8 +2967,11 @@ async function tickPrice(){
     const mins = Math.max(0, Math.round((p.nextFundingTime - Date.now())/60000));
     $("tkNext").textContent = Math.floor(mins/60) + "h " + String(mins%60).padStart(2,"0") + "m";
   }
-  if (oi){ S.ind.oiLive = +oi.openInterest; S.ind.oiLiveTime = oi.time;
-    $("tkOI").textContent = fmtNum(+oi.openInterest, 0) + " ₿"; }
+  if (oi){
+    // compute() creates S.ind; the first loadAll may still be in flight
+    if (S.ind){ S.ind.oiLive = +oi.openInterest; S.ind.oiLiveTime = oi.time; }
+    $("tkOI").textContent = fmtNum(+oi.openInterest, 0) + " ₿";
+  }
 }
 
 async function refresh(){
@@ -2964,9 +2993,18 @@ async function loadConfig(){
     const r = await fetch("config.json", { cache:"no-store" });
     if (!r.ok) return;
     const j = await r.json();
-    let n = 0;
-    for (const k of Object.keys(j)) if (k in CFG && typeof j[k] === typeof CFG[k]) { CFG[k] = j[k]; n++; }
+    const POSITIVE = ["pivotN","maLen","maSlopeLookback","retLookback","oiLookback",
+                      "fundShort","fundLong","pctWindowDays","rvLen","tierL1Arm","tierL2Arm"];
+    let n = 0, rejected = [];
+    for (const k of Object.keys(j)){
+      if (!(k in CFG) || typeof j[k] !== typeof CFG[k]) continue;
+      const v = j[k];
+      if (typeof v === "number" && !isFinite(v)) { rejected.push(k); continue; }
+      if (POSITIVE.includes(k) && !(v >= 1)) { rejected.push(k); continue; }
+      CFG[k] = v; n++;
+    }
     S.configLoaded = n;
+    if (rejected.length) S.errors.push("config.json: ignored out-of-range " + rejected.join(", "));
     S.configVersion = j._version || null;
     S.configLog = j._changelog || [];
     const el = document.getElementById("cfgVer");
