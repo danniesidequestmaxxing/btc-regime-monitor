@@ -55,7 +55,7 @@ normally sold at roughly $99/month and the liquidation split normally sold at
 roughly $299/month are both served free by the sources above. Two gaps remain
 with no free equivalent found: spot ETF net flows and CME basis.
 
-Failed requests grey their panel and print the status code. Nothing is interpolated, forward-filled, or estimated.
+Failed requests grey their panel and print the endpoint and status code. Nothing is interpolated, forward-filled, or estimated.
 
 ---
 
@@ -115,7 +115,19 @@ Thresholds live in [`config.json`](config.json) with a changelog. The page falls
 
 Serverless functions are pinned to `fra1` in [`vercel.json`](vercel.json). **Binance returns HTTP 451 to US datacenter IPs**, so a US-region function cannot reach it.
 
-Hosting does not proxy anything — the browser fetches exchange APIs directly, using the viewer's own IP. Deploying does not bypass a regional block.
+The browser fetches exchange APIs directly, using the viewer's own IP. That is the
+default and the fast path. When a direct fetch fails outright — a bare
+`Failed to fetch`, which is what a regional block on the futures API, a DNS or
+corporate filter, or an ad blocker with a crypto list all look like from
+JavaScript — or comes back 403/451, the page retries that one request through
+[`/api/relay`](api/relay.js) and remembers the host for the rest of the session.
+The relay refetches it from `fra1` and returns the bytes unchanged.
+
+The relay allowlists the exchange hosts this page already reads, so it is not a
+general-purpose proxy, and it only exists on a deployment: opened off disk or
+from a static file server the page probes it once, disables the fallback, and
+names the unreachable endpoints in the error box instead. Add `?relay=1` to the
+URL to skip the direct attempt and route everything through it.
 
 ---
 

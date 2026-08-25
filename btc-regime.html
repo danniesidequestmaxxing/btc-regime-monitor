@@ -877,17 +877,73 @@ const EP = {
 
 const S = { errors: [], data: {}, lastOk: null };
 
-/* ---------------- fetch ---------------- */
+/* ---------------- fetch ----------------
+
+   A browser can fail to reach an exchange host for reasons this page can
+   neither see nor fix: a regional block on the futures API, a DNS or corporate
+   filter, an ad blocker with a crypto list. It arrives as a bare TypeError
+   with no status code. When that happens — or when the host answers 403/451
+   — the request is retried once through /api/relay, this deployment's own
+   server-side pass-through, and the host is remembered so the rest of the
+   session goes straight there. The happy path is untouched: browser to
+   exchange, no extra hop. Opened off disk, or on a static host with no relay
+   route, the fallback disables itself after one probe and failures report as
+   before.                                                                  */
+const RELAY = {
+  on: location.protocol === "http:" || location.protocol === "https:",
+  forced: /[?&]relay=1\b/.test(location.search),   // ?relay=1 — skip the direct attempt
+  blocked: new Set(),                              // hosts proven unreachable this session
+};
+function hostOf(url){
+  try { return new URL(url, location.href).hostname; } catch (e) { return ""; }
+}
+async function viaRelay(url, opts){
+  try {
+    const r = await fetch("/api/relay?u=" + encodeURIComponent(url), opts);
+    // No x-relay header means nothing served this route — a static host's own
+    // 404, not an answer. Stop probing for the rest of the session.
+    if (!r.headers.get("x-relay")) { RELAY.on = false; return null; }
+    return r;
+  } catch (e) { RELAY.on = false; return null; }
+}
+async function netFetch(url, opts){
+  const host = hostOf(url);
+  if (RELAY.on && (RELAY.forced || RELAY.blocked.has(host))){
+    const r = await viaRelay(url, opts);
+    if (r) return r;
+  }
+  let direct = null, err = null;
+  try { direct = await fetch(url, opts); }
+  catch (e) { err = e; }
+  // 451 is Binance's regional block; 403 is the usual edge refusal.
+  if (direct && direct.status !== 451 && direct.status !== 403) return direct;
+  if (RELAY.on){
+    const r = await viaRelay(url, opts);
+    if (r){ RELAY.blocked.add(host); return r; }
+  }
+  if (err) throw err;
+  return direct;
+}
+/** Keeps the endpoint name on the message. A raw "Failed to fetch" repeated
+    once per request says nothing about which request. */
+function netErr(key, e){
+  const m = (e && e.message) || "network error";
+  if (m.indexOf(key) === 0) return m;
+  if (/failed to fetch|load failed|networkerror/i.test(m))
+    return key + " → unreachable from this browser (blocked, offline or filtered)";
+  return key + " → " + m;
+}
+
 async function getJSON(url, key){
-  const r = await fetch(url, { cache: "no-store" });
+  const r = await netFetch(url, { cache: "no-store" });
   if (!r.ok) throw new Error(key + " → HTTP " + r.status + (r.status===451 ? " (region blocked)" : ""));
   return r.json();
 }
 async function tryJSON(url, key, altUrl){
   try { return await getJSON(url, key); }
   catch (e) {
-    if (altUrl) { try { return await getJSON(altUrl, key); } catch (e2) { S.errors.push(e2.message); return null; } }
-    S.errors.push(e.message || (key + " → network error"));
+    if (altUrl) { try { return await getJSON(altUrl, key); } catch (e2) { S.errors.push(netErr(key, e2)); return null; } }
+    S.errors.push(netErr(key, e));
     return null;
   }
 }
@@ -1311,11 +1367,15 @@ function entryDate(I){
   return { entered, windowDays: states.length, held: entered === null, current: cur };
 }
 
-/* ---------------- formatting ---------------- */
-const fmtPct  = v => (v>0?"+":"") + v.toFixed(2) + "%";
-const fmtPct1 = v => (v>0?"+":"") + v.toFixed(1) + "%";
-const fmtUsd  = v => "$" + v.toLocaleString("en-US",{maximumFractionDigits:0});
-const fmtNum  = (v,d) => v.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+/* ---------------- formatting ----------------
+   Every formatter returns the em dash for a missing number rather than
+   throwing. One absent field used to abort the whole render pass it sat in,
+   which greyed panels that had perfectly good data of their own. */
+const num = v => typeof v === "number" && isFinite(v);
+const fmtPct  = v => num(v) ? (v>0?"+":"") + v.toFixed(2) + "%" : "—";
+const fmtPct1 = v => num(v) ? (v>0?"+":"") + v.toFixed(1) + "%" : "—";
+const fmtUsd  = v => num(v) ? "$" + v.toLocaleString("en-US",{maximumFractionDigits:0}) : "—";
+const fmtNum  = (v,d) => num(v) ? v.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d}) : "—";
 function fmtTime(ms){
   if (!ms) return "—";
   const d = new Date(ms);
@@ -1367,10 +1427,10 @@ const EXT = { data:{}, ind:{}, ep:{
 
 async function extGet(url, key, opts){
   try {
-    const r = await fetch(url, Object.assign({ cache:"no-store" }, opts||{}));
+    const r = await netFetch(url, Object.assign({ cache:"no-store" }, opts||{}));
     if (!r.ok) throw new Error(key + " → HTTP " + r.status);
     return await r.json();
-  } catch (e) { S.errors.push(e.message || (key + " → network error")); return null; }
+  } catch (e) { S.errors.push(netErr(key, e)); return null; }
 }
 
 /* ---- minimal ZIP reader: Binance archive stores one deflated CSV ---- */
@@ -1406,7 +1466,7 @@ function saveOICache(c){
 }
 async function fetchArchiveDay(dateStr){
   const url = EXT.ep.vision + "/data/futures/um/daily/metrics/BTCUSDT/BTCUSDT-metrics-" + dateStr + ".zip";
-  const r = await fetch(url, { cache:"force-cache" });
+  const r = await netFetch(url, { cache:"force-cache" });
   if (!r.ok) return null;                       // day not published yet
   const csv = await unzipSingle(await r.arrayBuffer());
   const lines = csv.trim().split("\n");
@@ -1932,6 +1992,14 @@ function renderErrorList(){
   for (const e of S.errors){
     const li = document.createElement("li");
     li.textContent = String(e);
+    ul.appendChild(li);
+  }
+  // A host unreachable from the browser is not a broken host. Say so, once,
+  // when the relay that would have routed around it is not available here.
+  if (!RELAY.on && S.errors.some(e => /unreachable from this browser/.test(String(e)))){
+    const li = document.createElement("li");
+    li.textContent = "Those hosts are blocked between this browser and the exchange, not down. "
+      + "Served from the Vercel deployment (which has the /api/relay route) the page fetches them server-side instead.";
     ul.appendChild(li);
   }
 }
@@ -2959,9 +3027,9 @@ function drawChart(){
 let priceTimer, fullTimer;
 async function tickPrice(){
   const [t, p, oi] = await Promise.all([
-    fetch(EP.spot + "/api/v3/ticker/24hr?symbol=BTCUSDT").then(r=>r.ok?r.json():null).catch(()=>null),
-    fetch(EP.fapi + "/fapi/v1/premiumIndex?symbol=BTCUSDT").then(r=>r.ok?r.json():null).catch(()=>null),
-    fetch(EP.fapi + "/fapi/v1/openInterest?symbol=BTCUSDT").then(r=>r.ok?r.json():null).catch(()=>null),
+    netFetch(EP.spot + "/api/v3/ticker/24hr?symbol=BTCUSDT").then(r=>r.ok?r.json():null).catch(()=>null),
+    netFetch(EP.fapi + "/fapi/v1/premiumIndex?symbol=BTCUSDT").then(r=>r.ok?r.json():null).catch(()=>null),
+    netFetch(EP.fapi + "/fapi/v1/openInterest?symbol=BTCUSDT").then(r=>r.ok?r.json():null).catch(()=>null),
   ]);
   if (t){ S.data.tick = t;
     const ch = +t.priceChangePercent;
