@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BTC Regime Monitor</title>
+<link rel="stylesheet" href="market-context.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -766,6 +767,35 @@ footer strong{color:var(--ink-2);font-weight:600}
     </div>
   </section>
 
+  <section id="market-context" aria-labelledby="marketContextHeading">
+    <div class="mc-section-head">
+      <div><h2 id="marketContextHeading">Flows, holders &amp; leverage</h2><p class="sub">Market context · independent of the regime classifier</p></div>
+      <button class="refresh" id="mcRefresh" type="button">Refresh panels</button>
+    </div>
+    <div class="mc-grid">
+      <article class="panel" id="mc-oi">
+        <div class="p-head"><h3>Open interest dominance</h3><span class="p-flag flat" data-status>Loading</span></div>
+        <div class="p-body" data-content aria-live="polite"><p class="sub">Loading BTC / ETH / Others shares…</p></div>
+        <div class="p-foot"><span data-updated>—</span><a href="https://coinalyze.net/futures-data/global-charts/" target="_blank" rel="noopener noreferrer">Coinalyze history ↗</a></div>
+      </article>
+      <article class="panel" id="mc-etf">
+        <div class="p-head"><h3>BTC / ETH daily ETF tracker</h3><div class="mc-tabs" aria-label="ETF asset"><button type="button" data-etf="btc" aria-pressed="true">BTC</button><button type="button" data-etf="eth" aria-pressed="false">ETH</button></div></div>
+        <div class="p-body" data-content aria-live="polite"><p class="sub">Loading reported ETF holdings changes…</p></div>
+        <div class="p-foot"><span data-updated>—</span><a href="https://xoomar.com/markets/api/etf-flows" target="_blank" rel="noopener noreferrer">Data: XOOMAR ↗</a></div>
+      </article>
+      <article class="panel" id="mc-holders">
+        <div class="p-head"><h3>Long / short-term holder movement</h3><span class="p-flag flat" data-status>Loading</span></div>
+        <div class="p-body" data-content aria-live="polite"><p class="sub">Loading holder-age supply changes…</p></div>
+        <div class="p-foot"><span data-updated>—</span><a href="https://bitcoin-data.com/bguser/free-features.html" target="_blank" rel="noopener noreferrer">BGeometrics ↗</a></div>
+      </article>
+      <article class="panel" id="mc-liquidations">
+        <div class="p-head"><h3>Liquidation map</h3><div class="mc-tabs" aria-label="Liquidation dataset"><button type="button" data-liq="recorded" aria-pressed="true">Recorded</button><button type="button" data-liq="modeled" aria-pressed="false">Modeled</button></div></div>
+        <div class="p-body" data-content aria-live="polite"><p class="sub">Loading liquidations by price level…</p></div>
+        <div class="p-foot"><span data-updated>—</span><a href="https://www.coinglass.com/pro/futures/LiquidationMap" target="_blank" rel="noopener noreferrer">CoinGlass map ↗</a></div>
+      </article>
+    </div>
+  </section>
+
   <section>
     <h2>Historical validation</h2>
     <div class="val" id="valPanel" style="margin-top:12px">
@@ -823,7 +853,7 @@ footer strong{color:var(--ink-2);font-weight:600}
   <footer>
     <p><strong>What this is.</strong> A state description of Binance BTCUSDT spot and perpetual data, recomputed from live public endpoints. It classifies the present; it does not forecast, target a price, or tell you what to trade. Every threshold below is a choice, not a validated parameter — they are printed in the conditions table so you can edit them in this file.</p>
     <p><strong>Machine-readable snapshot.</strong> <a href="/api/snapshot">/api/snapshot</a> returns the state, the tier verdict and every indicator as JSON, recomputed server-side on request. Set a <code>SNAPSHOT_TOKEN</code> environment variable on the project to require a read-only token. Thresholds come from <a href="/config.json">config.json</a> <span id="cfgVer"></span>.</p>
-    <p><strong>Known limits.</strong> Single-venue perpetuals are a biased sample of total market positioning, not the aggregate. Open interest history is capped at 30 days by the public endpoint, so the OI-to-volume figure is a 30-day range position, not a 2-year percentile; it is divided by a trailing 7-day mean volume because raw daily perp volume has a strong weekday cycle that would otherwise dominate the reading. Funding percentiles use a trailing 2-year window against an asset with roughly 4-year cycles, so the same absolute condition ranks differently depending on where the window sits. Equity proxy leadership (COIN, MSTR, miners) is absent: no free browser-reachable source sends CORS headers. Nothing here is filled in, interpolated, or estimated — failed requests grey their panel and report the status code.</p>
+    <p><strong>Known limits.</strong> Single-venue perpetuals are a biased sample of total market positioning, not the aggregate. Open interest history is capped at 30 days by the public endpoint, so the OI-to-volume figure is a 30-day range position, not a 2-year percentile; it is divided by a trailing 7-day mean volume because raw daily perp volume has a strong weekday cycle that would otherwise dominate the reading. Funding percentiles use a trailing 2-year window against an asset with roughly 4-year cycles, so the same absolute condition ranks differently depending on where the window sits. Equity proxy leadership (COIN, MSTR, miners) is absent: no free browser-reachable source sends CORS headers. Missing observations are not filled in or interpolated. The market-context panels label derived ETF flows, holder-age proxies and modeled liquidation levels; these do not feed the classifier. Failed requests show an unavailable state.</p>
   </footer>
 </div>
 
@@ -3100,5 +3130,6 @@ loadValidation();
 priceTimer = setInterval(tickPrice, 10000);   // live price / funding / OI snapshot
 fullTimer  = setInterval(loadAll, 300000);    // full recompute every 5 minutes
 </script>
+<script src="market-context.js" defer></script>
 </body>
 </html>

@@ -35,7 +35,7 @@ One flaw needs no statistics at all. `EARLY_UPTREND` requires open interest flat
 
 ## Data sources
 
-All public, no API key required for anything on the page.
+The default panels use public feeds without keys. The optional **modeled** liquidation map requires a CoinGlass API subscription with map access.
 
 | Source | Used for |
 |---|---|
@@ -49,21 +49,64 @@ All public, no API key required for anything on the page.
 | Coin Metrics Community | MVRV, market cap, exchange flows |
 | OKX liquidation orders | forced liquidations with the long/short split |
 | CoinGecko public_treasury | corporate BTC holdings and cost basis |
+| CoinGecko derivatives | current BTC / ETH / Others OI shares and BTC-to-ETH OI ratio |
+| XOOMAR issuer holdings | daily holdings-derived ETF flows: IBIT, BITB, ARKB, ETHA, ETHW |
+| BGeometrics HODL waves | holder supply and 1/7/30-day changes using a six-month age cutoff |
+| OKX instruments + liquidation orders | recorded liquidation map by bankruptcy-price band, converted to USD notional |
+| CoinGlass (optional key) | modeled Binance BTCUSDT liquidation map |
 
-**No paid subscription is required for anything in this repo.** The on-chain group
-normally sold at roughly $99/month and the liquidation split normally sold at
-roughly $299/month are both served free by the sources above. Two gaps remain
-with no free equivalent found: spot ETF net flows and CME basis.
+### New market-context panels
 
-Failed requests grey their panel and print the endpoint and status code. Nothing is interpolated, forward-filled, or estimated.
+`#market-context` contains four independent panels with a separate refresh control,
+dates, source links, responsive SVG charts, and accessible data tables. They refresh
+every five minutes while the page is visible and do not affect the classifier.
+
+- **OI dominance:** BTC/ETH/other shares of USD OI plus BTC/ETH ratio. Coinalyze's
+  public chart requests returned HTTP 403 from this environment; its exact history
+  is linked, **not embedded or reproduced**. The native snapshot uses CoinGecko's
+  different coverage, including perpetuals, dated futures, and noncrypto underlyings
+  in Others. Duplicate instruments, expired contracts, invalid values, and contracts
+  last traded over 24 hours ago are excluded. Last-trade times are not OI update times.
+- **ETF tracker:** BTC/ETH switch, latest report, last five complete reports, chart,
+  and fund breakdown. XOOMAR derives USD flows from changes in issuer coin holdings.
+  This covers three BTC and two ETH funds, **not all US spot ETFs or official net
+  creations**. Missing reports stay null; partial totals and bars are labeled.
+- **Holder movement:** free UTXO-age proxy (≥6 months versus <6 months), not the
+  standard entity-adjusted 155-day LTH/STH series. Net changes use exact calendar
+  dates; no interpolation. Coin aging and issuance also change cohort balances.
+- **Liquidation map:** Recorded mode groups OKX BTC-USDT swap events in $100
+  bankruptcy-price bands. Contract notional uses `ctVal × ctMult × sz × bkPx`.
+  The returned event window is labeled and is not a 24-hour cross-exchange total.
+  Modeled mode uses CoinGlass's Binance BTCUSDT 1-day map; absent credentials produce
+  an explicit unavailable state. The adapter follows the documented response schema
+  and is fixture-tested, but cannot be live-verified without an eligible key.
+
+Provider documentation: [CoinGecko](https://docs.coingecko.com/reference/derivatives-tickers),
+[XOOMAR](https://xoomar.com/markets/api/etf-flows),
+[BGeometrics](https://bitcoin-data.com/bguser/free-features.html),
+[CoinGlass](https://docs.coinglass.com/reference/liquidation-map).
+
+`/api/market-context?kind=oi|etf-btc|etf-eth|holders|liquidations` serves these feeds.
+Add `&mode=modeled` for the CoinGlass liquidation map. The endpoint accepts GET
+only and fixed upstreams. Timeouts, per-instance caching/request coalescing, and
+CDN caching bound requests: 5 minutes for OI/liquidations, 1 hour for ETFs, and
+24 hours for holder data. Failures are not cached or presented as fresh values.
+
+Failed core requests grey their panels; new panels show explicit source errors and
+clear old values. Missing observations are never forward-filled. Derived flows,
+holder proxies and modeled liquidation levels are labeled as such.
 
 ---
 
 ## Running it
 
-The dashboard is a single self-contained file. Open `btc-regime.html` in a browser and it works — no build step, no server, no key. The `/api` routes need Vercel.
+The core dashboard lives in `btc-regime.html`; the new panels use
+`market-context.js` and `market-context.css`. There is no build step. Core exchange
+panels can still open off disk; API-backed panels need Vercel or the local server
+(Node 20+). Keep the adjacent JS/CSS files with the HTML.
 
 ```bash
+node tools/dev.js    # http://127.0.0.1:8765/#market-context, including API routes
 vercel dev            # full local environment including /api
 vercel deploy --prod  # ship
 ```
@@ -72,6 +115,7 @@ vercel deploy --prod  # ship
 
 ```bash
 node tests/run.js
+node --test tests/market-context.js
 ```
 
 64 assertions over the indicator layer. Every fixture is small enough to check
@@ -89,6 +133,10 @@ The suite has been mutation-tested: flipping the pivot comparison, making
 `pctRank` inclusive, switching `stdev` to a population deviation, inverting the
 CVD sign, moving the quadrant boundary, and changing the annualisation factor
 each fail it.
+
+The market-context suite checks USD OI aggregation, partial ETF reports and nulls,
+exact-date holder changes, contract-to-USD liquidation conversion, map schemas,
+API validation, error isolation, caching and server-only key handling.
 
 ### Regenerating the validation
 
@@ -108,6 +156,11 @@ Thresholds live in [`config.json`](config.json) with a changelog. The page falls
 |---|---|
 | `TWELVEDATA_API_KEY` or `ALPHAVANTAGE_API_KEY` | enables `/api/equity` and the BTC–QQQ correlation panel |
 | `SNAPSHOT_TOKEN` | requires a read-only token on `/api/snapshot`; without it the route is open |
+| `COINGLASS_API_KEY` | enables Modeled liquidation map; requires a plan with `/api/futures/liquidation/map` access (Professional/Enterprise in the provider docs checked October 2026) |
+
+Store provider credentials in Vercel environment variables (or the local server
+environment), never in client code or Git. Redeploy after changing production
+environment variables. No key is needed for Recorded mode or the free context feeds.
 
 ---
 
@@ -154,15 +207,16 @@ URL to skip the direct attempt and route everything through it.
 
 ## Not included
 
-- **Spot ETF net flows** — Farside returns 403 to automated requests and no free
-  machine-readable alternative was found.
+- **Full-market official spot ETF net flows** — Farside blocks automated requests.
+  The new free tracker covers a subset of issuer holdings-derived flows instead.
 - **CME basis** — no free source.
 - **BTC–QQQ correlation** — implemented at `/api/equity`, but dormant until an
   equity API key is set. Free browser-reachable equity data no longer exists:
   Stooq serves a proof-of-work bot challenge and Yahoo sends no CORS header.
 - **mNAV** — the treasury panel shows holdings and cost basis; the ratio needs an
   equity market cap, so it completes with the same key.
-- **LTH supply** — age-banded supply is not in either free on-chain source.
+- **Exact 155-day entity-adjusted LTH/STH supply** — the new free holder panel uses
+  BGeometrics six-month UTXO age bands instead.
 
 ---
 
